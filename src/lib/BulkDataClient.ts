@@ -674,15 +674,12 @@ class BulkDataClient extends EventEmitter
         // Just "remember" the progress values but don't emit anything yet
         download.on("progress", state => Object.assign(_state, state))
 
-        const streams: (NodeJS.ReadableStream | NodeJS.WritableStream | NodeJS.ReadWriteStream)[] = [];
-
         // Start the download (the stream will be paused though)
-        let downloadStream: Readable = await download.run({
+        let processPipeline: Readable = await download.run({
             accessToken,
             signal: this.abortController.signal,
             requestOptions: this.options.requests
-        })
-        .catch(e => {
+        }).catch(e => {
             if (e instanceof FileDownloadError) {
                 this.emit("downloadError", {
                     body: null, // Buffer
@@ -693,8 +690,6 @@ class BulkDataClient extends EventEmitter
             }
             throw e
         });
-
-        streams.push(downloadStream)
 
         // ---------------------------------------------------------------------
         // Create an NDJSON parser to verify that every single line is valid
@@ -714,8 +709,9 @@ class BulkDataClient extends EventEmitter
             expectedCount: exportType == "output" ? file.count || -1 : -1,
             expectedResourceType
         })
-            
-        streams.push(parser)
+
+        processPipeline = processPipeline.pipe(parser);
+
 
         // ---------------------------------------------------------------------
         // Download attachments
@@ -749,7 +745,7 @@ class BulkDataClient extends EventEmitter
     
             docRefProcessor.on("attachment", () => _state.attachments! += 1)
 
-            streams.push(docRefProcessor)
+            processPipeline = processPipeline.pipe(docRefProcessor)
         }
 
 
@@ -761,33 +757,19 @@ class BulkDataClient extends EventEmitter
             _state.resources! += 1
             onProgress(_state)
         });
-        streams.push(stringify)
+        processPipeline = processPipeline.pipe(stringify);
 
 
         // ---------------------------------------------------------------------
         // Write the file to the configured destination
         // ---------------------------------------------------------------------
-        try {
-            await pipeline(streams)
-            
-        } catch (e: any) {
-            this.emit("downloadError", {
-                body   : null,
-                code   : e.code || null,
-                fileUrl: e.fileUrl || file.url,
-                message: String(e.message || "Downloading failed")
-            })
+        await this.writeToDestination(fileName, processPipeline, subFolder)
 
-            throw e
-        }
-        
         this.emit("downloadComplete", {
             fileUrl      : file.url,
             fileSize     : _state.uncompressedBytes,
             resourceCount: _state.resources!
         })
-        
-        await this.writeToDestination(fileName, stringify, subFolder)
     }
 
     /**
