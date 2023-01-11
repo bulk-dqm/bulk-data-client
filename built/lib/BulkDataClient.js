@@ -467,14 +467,12 @@ class BulkDataClient extends events_1.EventEmitter {
         };
         // Just "remember" the progress values but don't emit anything yet
         download.on("progress", state => Object.assign(_state, state));
-        const streams = [];
         // Start the download (the stream will be paused though)
-        let downloadStream = await download.run({
+        let processPipeline = await download.run({
             accessToken,
             signal: this.abortController.signal,
             requestOptions: this.options.requests
-        })
-            .catch(e => {
+        }).catch(e => {
             if (e instanceof errors_1.FileDownloadError) {
                 this.emit("downloadError", {
                     body: null,
@@ -485,7 +483,6 @@ class BulkDataClient extends events_1.EventEmitter {
             }
             throw e;
         });
-        streams.push(downloadStream);
         // ---------------------------------------------------------------------
         // Create an NDJSON parser to verify that every single line is valid
         // ---------------------------------------------------------------------
@@ -511,7 +508,7 @@ class BulkDataClient extends events_1.EventEmitter {
             expectedCount: exportType == "output" ? file.count || -1 : -1,
             expectedResourceType
         });
-        streams.push(parser);
+        processPipeline = processPipeline.pipe(parser);
         // ---------------------------------------------------------------------
         // Download attachments
         // ---------------------------------------------------------------------
@@ -541,7 +538,7 @@ class BulkDataClient extends events_1.EventEmitter {
                 },
             });
             docRefProcessor.on("attachment", () => _state.attachments += 1);
-            streams.push(docRefProcessor);
+            processPipeline = processPipeline.pipe(docRefProcessor);
         }
         // ---------------------------------------------------------------------
         // Transforms from stream of objects back to stream of line strings
@@ -551,28 +548,16 @@ class BulkDataClient extends events_1.EventEmitter {
             _state.resources += 1;
             onProgress(_state);
         });
-        streams.push(stringify);
+        processPipeline = processPipeline.pipe(stringify);
         // ---------------------------------------------------------------------
         // Write the file to the configured destination
         // ---------------------------------------------------------------------
-        try {
-            await (0, promises_1.pipeline)(streams);
-        }
-        catch (e) {
-            this.emit("downloadError", {
-                body: null,
-                code: e.code || null,
-                fileUrl: e.fileUrl || file.url,
-                message: String(e.message || "Downloading failed")
-            });
-            throw e;
-        }
+        await this.writeToDestination(fileName, processPipeline, subFolder);
         this.emit("downloadComplete", {
             fileUrl: file.url,
             fileSize: _state.uncompressedBytes,
             resourceCount: _state.resources
         });
-        await this.writeToDestination(fileName, stringify, subFolder);
     }
     /**
      * Given a readable stream as input sends the data to the destination. The
