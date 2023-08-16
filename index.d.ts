@@ -282,6 +282,9 @@ export declare namespace BulkDataClient {
          */
         tokenUrl: string
 
+        basicAuthUserName: string
+        basicAuthPassword: string
+
         /**
          * The private key used to sign authentication tokens
          */

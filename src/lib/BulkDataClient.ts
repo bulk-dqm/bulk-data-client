@@ -272,35 +272,44 @@ class BulkDataClient extends EventEmitter
             return this.accessToken;
         }
 
-        const { tokenUrl, clientId, accessTokenLifetime, privateKey } = this.options;
+        const { tokenUrl, clientId, accessTokenLifetime, privateKey, basicAuthUserName, basicAuthPassword } = this.options;
 
-        if (!tokenUrl || tokenUrl == "none" || !clientId || !privateKey) {
+        if (!tokenUrl || tokenUrl == "none" || ((!clientId || !privateKey) && (!basicAuthUserName || !basicAuthPassword))) {
             return ""
         }
 
-        const claims = {
-            iss: clientId,
-            sub: clientId,
-            aud: tokenUrl,
-            exp: Math.round(Date.now() / 1000) + accessTokenLifetime,
-            jti: jose.util.randomBytes(10).toString("hex")
-        };
+        if (clientId) {
+            const claims = {
+                iss: clientId,
+                sub: clientId,
+                aud: tokenUrl,
+                exp: Math.round(Date.now() / 1000) + accessTokenLifetime,
+                jti: jose.util.randomBytes(10).toString("hex")
+            };
 
-        const token = jwt.sign(claims, privateKey.toPEM(true), {
-            algorithm: privateKey.alg as jwt.Algorithm,
-            keyid: privateKey.kid
-        });
+            const token = jwt.sign(claims, privateKey.toPEM(true), {
+                algorithm: privateKey.alg as jwt.Algorithm,
+                keyid: privateKey.kid
+            });
 
-        const authRequest = request<Types.TokenResponse>(tokenUrl, {
-            method: "POST",
-            responseType: "json",
-            form: {
-                scope: this.options.scope || "system/*.read",
-                grant_type: "client_credentials",
-                client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-                client_assertion: token
-            }
-        });
+            var authRequest = request<Types.TokenResponse>(tokenUrl, {
+                method: "POST",
+                responseType: "json",
+                form: {
+                    scope: this.options.scope || "system/*.read",
+                    grant_type: "client_credentials",
+                    client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+                    client_assertion: token
+                }
+            });
+        } else {
+            var authRequest = request<Types.TokenResponse>(tokenUrl, {
+                method: "POST",
+                responseType: "json",
+                username: basicAuthUserName,
+                password: basicAuthPassword
+            });
+        }
 
         const abort = () => {
             debug("Aborting authorization request")

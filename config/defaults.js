@@ -21,6 +21,9 @@
      */
     tokenUrl: "none",
 
+    basicAuthUserName: "",
+    basicAuthPassword: "",
+
     /**
      * The private key (JWK) used to sign authentication tokens. This is not
      * needed for open servers
